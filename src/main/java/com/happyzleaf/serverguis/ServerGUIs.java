@@ -85,7 +85,7 @@ public class ServerGUIs {
 						} else {
 							modifyingPlayers.add(player.getUniqueId());
 							
-							src.sendMessage(Text.of(TextColors.GREEN, "You're in modify mode. Right-Click a block with a stick to attach a gui. Shift-Right-Click a block with a stick to remove it."));
+							src.sendMessage(Text.of(TextColors.GREEN, "You're in modify mode. Right-Click a block to attach a GUI. Shift-Right-Click it to remove its GUI."));
 						}
 					} else {
 						Gui gui = GuiData.guiList.stream().filter(g -> g.id == guiId).findFirst().orElse(null);
@@ -170,8 +170,7 @@ public class ServerGUIs {
 			}
 			Gui gui = GuiData.guiList.stream().filter(g -> g.dimensionId.equals(dimensionId) && g.position.equals(event.getTargetBlock().getPosition())).findFirst().orElse(null);
 			
-			ItemStack is = player.getItemInHand(HandTypes.MAIN_HAND).orElse(null);
-			if (is != null && is.getType().equals(ItemTypes.STICK) && modifyingPlayers.contains(player.getUniqueId())) {
+			if (modifyingPlayers.contains(player.getUniqueId())) {
 				if (player.get(Keys.IS_SNEAKING).orElse(false)) {
 					if (gui != null) {
 						GuiData.guiList.remove(gui);
