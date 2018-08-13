@@ -4,7 +4,6 @@ import com.google.inject.Inject;
 import com.happyzleaf.serverguis.data.Gui;
 import com.happyzleaf.serverguis.data.GuiData;
 import com.happyzleaf.serverguis.data.SlotProperty;
-import org.spongepowered.api.CatalogType;
 import org.spongepowered.api.Sponge;
 import org.spongepowered.api.block.BlockSnapshot;
 import org.spongepowered.api.command.CommandException;
@@ -29,8 +28,10 @@ import org.spongepowered.api.event.item.inventory.ClickInventoryEvent;
 import org.spongepowered.api.event.item.inventory.InteractInventoryEvent;
 import org.spongepowered.api.item.ItemType;
 import org.spongepowered.api.item.ItemTypes;
-import org.spongepowered.api.item.inventory.*;
-import org.spongepowered.api.item.inventory.property.InventoryCapacity;
+import org.spongepowered.api.item.inventory.Inventory;
+import org.spongepowered.api.item.inventory.InventoryArchetypes;
+import org.spongepowered.api.item.inventory.ItemStack;
+import org.spongepowered.api.item.inventory.ItemStackSnapshot;
 import org.spongepowered.api.item.inventory.property.InventoryDimension;
 import org.spongepowered.api.plugin.Plugin;
 import org.spongepowered.api.plugin.PluginContainer;
@@ -40,7 +41,6 @@ import org.spongepowered.api.text.action.TextActions;
 import org.spongepowered.api.text.format.TextColors;
 
 import java.io.File;
-import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
@@ -99,32 +99,22 @@ public class ServerGUIs {
 						String command = ((String) args.getOne("command").orElse("")).toLowerCase();
 						String[] arguments = args.getOne("arguments").map(o -> ((String) o).split(" ")).orElse(new String[0]);
 						switch (command) {
-							case "settype":
+							case "setrows":
 								if (arguments.length != 1) {
 									throw new CommandException(Text.of(TextColors.RED, "Not enough arguments. Please follow the suggestions."));
 								}
-								String archetypeId = arguments[0];
-								if (!archetypeId.contains(":")) archetypeId = "minecraft:" + archetypeId;
-								gui.archetypeId = Sponge.getRegistry().getType(InventoryArchetype.class, archetypeId).orElseThrow(() -> new CommandException(Text.of(TextColors.RED, "The archetype \'" + arguments[0] + "\' cannot be found."))).getId();
-								
-								src.sendMessage(Text.of(TextColors.GREEN, "Successfully updated the type."));
-								break;
-							case "rows":
-							case "columns":
-								if (arguments.length != 1) {
-									throw new CommandException(Text.of(TextColors.RED, "Not enough arguments. Please follow the suggestions."));
-								}
-								int value;
+								int rows;
 								try {
-									value = Integer.parseInt(arguments[0]);
+									rows = Integer.parseInt(arguments[0]);
 								} catch (NumberFormatException e) {
 									throw new CommandException(Text.of(TextColors.RED, "\'" + arguments[0] + "\' is not a valid number."));
 								}
-								if (command.equals("rows")) {
-									gui.rows = value;
-								} else {
-									gui.columns = value;
+								if (rows <= 0) {
+									throw new CommandException(Text.of(TextColors.RED, "The rows must start from 1."));
 								}
+								gui.rows = rows;
+								
+								src.sendMessage(Text.of("Successfully updated GUI's rows."));
 								break;
 							case "setlowergui":
 							case "setuppergui":
@@ -222,16 +212,6 @@ public class ServerGUIs {
 					player.sendMessage(Text.of(" "));
 					player.sendMessage(Text.builder("Modify your GUI").color(TextColors.DARK_GREEN)
 							.append(Text.NEW_LINE)
-							.append(Text.builder("[Set Type]").color(TextColors.GOLD)
-									.onHover(TextActions.showText(Text.of(TextColors.YELLOW, "Click to change the type of the inventory.\n", TextColors.YELLOW, "You will need to type the id.\n", TextColors.YELLOW, "Available types: " + listArchetypes() + ".")))
-									.onClick(TextActions.suggestCommand("/serverguis " + gui.id + " settype <type>"))
-									.build())
-							.append(Text.NEW_LINE)
-							.append(Text.builder("[Set Columns]").color(TextColors.GOLD)
-									.onHover(TextActions.showText(Text.of(TextColors.YELLOW, "Click to change the number of columns.\n", TextColors.YELLOW, "You will need to type the number.")))
-									.onClick(TextActions.suggestCommand("/serverguis " + gui.id + " setcolumns <columns>"))
-									.build())
-							.append(Text.NEW_LINE)
 							.append(Text.builder("[Set Rows]").color(TextColors.GOLD)
 									.onHover(TextActions.showText(Text.of(TextColors.YELLOW, "Click to change the number of rows.\n", TextColors.YELLOW, "You will need to type the number.")))
 									.onClick(TextActions.suggestCommand("/serverguis " + gui.id + " setrows <rows>"))
@@ -261,7 +241,7 @@ public class ServerGUIs {
 				}
 				event.setCancelled(true);
 			} else if (gui != null) {
-				Inventory inv = Inventory.builder().of(Sponge.getRegistry().getType(InventoryArchetype.class, gui.archetypeId).get())/*.property(InventoryDimension.of(gui.columns, gui.rows))*/.property(InventoryCapacity.of(gui.columns)).property(new SlotProperty(null, Property.Operator.EQUAL)).build(this);
+				Inventory inv = Inventory.builder().of(InventoryArchetypes.DOUBLE_CHEST).property(InventoryDimension.of(9, gui.rows)).property(new SlotProperty(null, Property.Operator.EQUAL)).build(this);
 				int i = 0;
 				for (Inventory slot : inv.slots()) {
 					slot.peek();
@@ -286,29 +266,6 @@ public class ServerGUIs {
 				event.setCancelled(true);
 			}
 		}
-	}
-	
-	//Don't sue me pls
-	private static String listArchetypes() {
-		StringBuilder result = new StringBuilder();
-		try {
-			for (Field f : InventoryArchetypes.class.getFields()) {
-				Object o = f.get(null);
-				String id = ((CatalogType) o).getId();
-				if (id.startsWith("sponge:") || id.equals("minecraft:unknown") || id.equals("minecraft:player") || id.equals("minecraft:crafting")) continue;
-				if (id.startsWith("minecraft:")) id = id.substring(10);
-				if (o instanceof InventoryArchetype) {
-					if (result.length() == 0) {
-						result.append(id);
-					} else {
-						result.append(", ").append(id);
-					}
-				}
-			}
-		} catch (IllegalAccessException e) {
-			e.printStackTrace();
-		}
-		return result.toString();
 	}
 	
 	@Listener
@@ -343,7 +300,7 @@ public class ServerGUIs {
 		}
 	}
 	
-	@Listener
+	@Listener //TODO test (obtain an item when an "hidden player inventory" gui is opened
 	public void onChangeInventory(ChangeInventoryEvent event) {
 		if (event.getTargetInventory().getInventoryProperty(SlotProperty.class).isPresent()) {
 			event.setCancelled(true);

@@ -3,12 +3,9 @@ package com.happyzleaf.serverguis.data;
 import com.flowpowered.math.vector.Vector3i;
 import ninja.leaping.configurate.objectmapping.Setting;
 import ninja.leaping.configurate.objectmapping.serialize.ConfigSerializable;
-import org.spongepowered.api.item.inventory.InventoryArchetypes;
 import org.spongepowered.api.item.inventory.ItemStackSnapshot;
 
-import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 /**
@@ -20,6 +17,9 @@ public class Gui {
 	private static int lastId = 0;
 	
 	public int id = lastId++;;
+	
+	@Setting
+	public int rows = 3;
 	
 	@Setting
 	public String dimensionId;
@@ -38,13 +38,4 @@ public class Gui {
 	
 	@Setting
 	public boolean showPlayerInventory = true;
-	
-	@Setting
-	public String archetypeId = InventoryArchetypes.CHEST.getId();
-	
-	@Setting
-	public int columns = 9;
-	
-	@Setting
-	public int rows = 3;
 }
