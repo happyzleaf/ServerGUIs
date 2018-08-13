@@ -27,6 +27,10 @@ public class ServerGUIs {
 		Keys.register();
 	}
 	
+	/**
+	 * YO first attempt screwed up cause sponge's keys are available only for entities (and tile entities), while the plugin must work with normal blocks too cause
+	 */
+	
 	@Listener
 	public void onInteractBlock(InteractBlockEvent.Secondary.MainHand event) {
 		if (event.getSource() instanceof Player) {
