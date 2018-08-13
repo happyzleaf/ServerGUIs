@@ -1,50 +1,227 @@
 package com.happyzleaf.serverguis;
 
+import com.google.inject.Inject;
 import com.happyzleaf.serverguis.data.Gui;
 import com.happyzleaf.serverguis.data.GuiData;
 import org.spongepowered.api.Sponge;
-import org.spongepowered.api.block.tileentity.TileEntity;
+import org.spongepowered.api.block.BlockSnapshot;
+import org.spongepowered.api.command.CommandException;
+import org.spongepowered.api.command.CommandResult;
+import org.spongepowered.api.command.args.GenericArguments;
+import org.spongepowered.api.command.spec.CommandSpec;
+import org.spongepowered.api.config.DefaultConfig;
+import org.spongepowered.api.data.DataQuery;
+import org.spongepowered.api.data.Transaction;
+import org.spongepowered.api.data.key.Keys;
 import org.spongepowered.api.data.type.HandTypes;
 import org.spongepowered.api.entity.living.player.Player;
 import org.spongepowered.api.event.Listener;
+import org.spongepowered.api.event.block.ChangeBlockEvent;
 import org.spongepowered.api.event.block.InteractBlockEvent;
+import org.spongepowered.api.event.game.GameReloadEvent;
 import org.spongepowered.api.event.game.state.GameInitializationEvent;
+import org.spongepowered.api.event.game.state.GameStoppingServerEvent;
+import org.spongepowered.api.item.ItemType;
 import org.spongepowered.api.item.ItemTypes;
 import org.spongepowered.api.item.inventory.ItemStack;
 import org.spongepowered.api.plugin.Plugin;
 import org.spongepowered.api.plugin.PluginContainer;
 import org.spongepowered.api.text.Text;
+import org.spongepowered.api.text.action.TextActions;
 import org.spongepowered.api.text.format.TextColors;
 
+import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
+import java.util.stream.Collectors;
+
+/**
+ * This is a bit of a mess but i wanted it to be powerful yet i didn't want to spend too much time on a test plugin.
+ */
 @Plugin(id = "serverguis", name = "ServerGUIs", version = "1.0.0", description = "Allows you to set up some custom guis with the help of a Resource Pack.",
 		url = "https://happyzleaf.com/", authors = {"happyzleaf"})
 public class ServerGUIs {
 	public static PluginContainer container;
+	public static ServerGUIs instance;
+	
+	@Inject
+	@DefaultConfig(sharedRoot = true)
+	private File configFile;
+	
+	private static List<UUID> modifyingPlayers = new ArrayList<>();
 	
 	@Listener
 	public void init(GameInitializationEvent event) {
 		container = Sponge.getPluginManager().getPlugin("serverguis").get();
-		Keys.register();
+		instance = this;
+		GuiData.init(configFile);
+		
+		CommandSpec serverguis = CommandSpec.builder()
+				.permission("serverguis.enable")
+				.arguments(GenericArguments.optional(GenericArguments.onlyOne(GenericArguments.integer(Text.of("guiId")))),
+						GenericArguments.optional(GenericArguments.onlyOne(GenericArguments.string(Text.of("command")))),
+						GenericArguments.optional(GenericArguments.onlyOne(GenericArguments.remainingJoinedStrings(Text.of("arguments")))))
+				.executor((src, args) -> {
+					if (!(src instanceof Player)) {
+						throw new CommandException(Text.of(TextColors.RED, "You must be a player to use this command."));
+					}
+					Player player = (Player) src;
+					
+					Integer guiId = (Integer) args.getOne("guiId").orElse(null);
+					if (guiId == null) {
+						if (modifyingPlayers.contains(player.getUniqueId())) {
+							modifyingPlayers.remove(player.getUniqueId());
+							
+							src.sendMessage(Text.of(TextColors.GREEN, "You're no longer in modify mode."));
+						} else {
+							modifyingPlayers.add(player.getUniqueId());
+							
+							src.sendMessage(Text.of(TextColors.GREEN, "You're in modify mode. Right-Click a block with a stick to attach a gui. Shift-Right-Click a block with a stick to remove it."));
+						}
+					} else {
+						Gui gui = GuiData.guiList.stream().filter(g -> g.id == guiId).findFirst().orElse(null);
+						if (gui == null) {
+							throw new CommandException(Text.of(TextColors.RED, "The gui cannot be found. Please launch this command only when suggested."));
+						}
+						
+						String command = ((String) args.getOne("command").orElse("")).toLowerCase();
+						String[] arguments = args.getOne("arguments").map(o -> ((String) o).split(" ")).orElse(new String[0]);
+						switch (command) {
+							case "setlowergui":
+							case "setuppergui":
+								if (arguments.length != 2) {
+									throw new CommandException(Text.of(TextColors.RED, "Not enough arguments. Please follow the suggestions."));
+								}
+								int damage;
+								try {
+									damage = Integer.parseInt(arguments[1]);
+								} catch (NumberFormatException e) {
+									throw new CommandException(Text.of(TextColors.RED, "\'" + arguments[1] + "\' is not a valid damage. (must be a number)."));
+								}
+								ItemStack is = ItemStack.builder().itemType(getItemType(arguments[0])).add(Keys.UNBREAKABLE, true).build();
+								is = ItemStack.builder().fromContainer(is.toContainer().set(DataQuery.of("UnsafeDamage"), damage)).build();
+								if (command.equals("setuppergui")) {
+									gui.upperGui = is.createSnapshot();
+									
+									src.sendMessage(Text.of(TextColors.GREEN, "Successfully updated upper GUI."));
+								} else {
+									gui.lowerGui = is.createSnapshot();
+									
+									src.sendMessage(Text.of(TextColors.GREEN, "Successfully updated lower GUI."));
+								}
+								break;
+							case "setblock":
+								if (arguments.length != 1) {
+									throw new CommandException(Text.of(TextColors.RED, "Not enough arguments. Please follow the suggestions."));
+								}
+								int position;
+								try {
+									position = Integer.parseInt(arguments[0]);
+								} catch (NumberFormatException e) {
+									throw new CommandException(Text.of(TextColors.RED, "\'" + arguments[1] + "\' is not a valid position. (must be a number)."));
+								}
+								if (position <= 0 || position > 54) {
+									throw new CommandException(Text.of(TextColors.RED, "The position must be within 1 and 54"));
+								}
+								ItemStack handIs = player.getItemInHand(HandTypes.MAIN_HAND).orElse(null);
+								gui.items.put(position - 1, handIs == null || handIs.getType() == ItemTypes.AIR ? null : handIs.createSnapshot());
+								
+								src.sendMessage(Text.of(TextColors.GREEN, "Successfully updated slot number " + position + " with your held item."));
+							case "switchvisibility":
+								gui.showPlayerInventory = !gui.showPlayerInventory;
+								src.sendMessage(Text.of(TextColors.GREEN, gui.showPlayerInventory ? "The player's inventory is now visible in the GUI." : "The player's inventory is now invisible in the GUI."));
+								break;
+						}
+					}
+					GuiData.saveNode();
+					return CommandResult.success();
+				})
+				.build();
+		Sponge.getCommandManager().register(this, serverguis, "serverguis");
 	}
 	
-	/**
-	 * YO first attempt screwed up cause sponge's keys are available only for entities (and tile entities), while the plugin must work with normal blocks too cause
-	 */
+	public static ItemType getItemType(String registryName) throws CommandException {
+		return Sponge.getGame().getRegistry().getType(ItemType.class, registryName).orElseThrow(() -> new CommandException(Text.of(TextColors.RED, "The item \"" + registryName + "\" cannot be found in the registry.")));
+	}
+	
+	@Listener
+	public void onGameReload(GameReloadEvent event) {
+		GuiData.loadNode();
+	}
+	
+	@Listener
+	public void onGameStoppingServer(GameStoppingServerEvent event) {
+		GuiData.saveNode();
+	}
 	
 	@Listener
 	public void onInteractBlock(InteractBlockEvent.Secondary.MainHand event) {
 		if (event.getSource() instanceof Player) {
 			Player player = (Player) event.getSource();
+			String dimensionId = Sponge.getServer().getWorld(event.getTargetBlock().getWorldUniqueId()).map(w -> w.getDimension().getType().getId()).orElse(null);
+			if (dimensionId == null) {
+				player.sendMessage(Text.of(TextColors.GREEN, "Cannot retrieve the dimension from the block, try again (trust me)."));
+				return;
+			}
+			Gui gui = GuiData.guiList.stream().filter(g -> g.dimensionId.equals(dimensionId) && g.position.equals(event.getTargetBlock().getPosition())).findFirst().orElse(null);
+			
 			ItemStack is = player.getItemInHand(HandTypes.MAIN_HAND).orElse(null);
-			if (is != null && is.getType().equals(ItemTypes.STICK)) {
-				TileEntity te = event.getTargetBlock().getLocation().get().getTileEntity().orElse(null);
-				if (te == null) {
-					//FUCK
-					Gui gui = .get(Keys.GUI).orElse(null);
-					if (gui == null) {
-						player.sendMessage(Text.of(TextColors.GREEN, "Successfully added data to the block."));
+			if (is != null && is.getType().equals(ItemTypes.STICK) && modifyingPlayers.contains(player.getUniqueId())) {
+				if (player.get(Keys.IS_SNEAKING).orElse(false)) {
+					if (gui != null) {
+						GuiData.guiList.remove(gui);
+						GuiData.saveNode();
+						
+						player.sendMessage(Text.of(TextColors.GREEN, "Successfully removed the GUI from this block."));
+					} else {
+						player.sendMessage(Text.of(TextColors.RED, "This block does not have a GUI."));
 					}
+				} else {
+					if (gui == null) {
+						gui = new Gui();
+						gui.position = event.getTargetBlock().getPosition();
+						gui.dimensionId = dimensionId;
+						GuiData.guiList.add(gui);
+						GuiData.saveNode();
+						
+						player.sendMessage(Text.of(TextColors.GREEN, "Successfully transformed this block into a GUI."));
+					}
+					
+					player.sendMessage(Text.builder("Modify: ").color(TextColors.DARK_GREEN)
+							.append(Text.builder("[Set the upper GUI]").color(TextColors.GOLD)
+									.onHover(TextActions.showText(Text.of(TextColors.YELLOW, "Click to set the upper gui.\n", TextColors.YELLOW, "You will need to type the item id and the damage value.")))
+									.onClick(TextActions.suggestCommand("/serverguis " + gui.id + " setuppergui minecraft:diamond_hoe <damage>"))
+									.build())
+							.append(Text.of(" "))
+							.append(Text.builder("[Set the lower GUI]").color(TextColors.GOLD)
+									.onHover(TextActions.showText(Text.of(TextColors.YELLOW, "Click to set the lower gui.\n", TextColors.YELLOW, "You will need to type the item id and the damage value.")))
+									.onClick(TextActions.suggestCommand("/serverguis " + gui.id + " setlowergui minecraft:diamond_hoe <damage>"))
+									.build())
+							.append(Text.of(" "))
+							.append(Text.builder("[Set item]").color(TextColors.GOLD)
+									.onHover(TextActions.showText(Text.of(TextColors.YELLOW, "Click to apply the held item to the given position.\n", TextColors.YELLOW, "You will need to type inventory position.")))
+									.onClick(TextActions.suggestCommand("/serverguis " + gui.id + " setblock <position>"))
+									.build())
+							.append(Text.of(" "))
+							.append(Text.builder("[Switch player's inventory visibility]").color(TextColors.GOLD)
+									.onHover(TextActions.showText(Text.of(TextColors.YELLOW, "Click to set visible/invisible the player's inventory inside the gui.")))
+									.onClick(TextActions.runCommand("/serverguis " + gui.id + " switchvisibility"))
+									.build())
+							.build());
 				}
+			} else if (gui != null) {
+				
+			}
+		}
+	}
+	
+	@Listener
+	public void onBlockBreak(ChangeBlockEvent.Break event) {
+		for (BlockSnapshot block : event.getTransactions().stream().map(Transaction::getOriginal).collect(Collectors.toList())) {
+			String dimensionId = Sponge.getServer().getWorld(block.getWorldUniqueId()).get().getDimension().getType().getId();
+			if (GuiData.guiList.removeIf(g -> g.dimensionId.equals(dimensionId) && g.position.equals(block.getPosition()))) {
+				GuiData.saveNode();
 			}
 		}
 	}
