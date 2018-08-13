@@ -4,6 +4,7 @@ import com.google.inject.Inject;
 import com.happyzleaf.serverguis.data.Gui;
 import com.happyzleaf.serverguis.data.GuiData;
 import com.happyzleaf.serverguis.data.SlotProperty;
+import org.spongepowered.api.CatalogType;
 import org.spongepowered.api.Sponge;
 import org.spongepowered.api.block.BlockSnapshot;
 import org.spongepowered.api.command.CommandException;
@@ -29,7 +30,8 @@ import org.spongepowered.api.event.item.inventory.InteractInventoryEvent;
 import org.spongepowered.api.item.ItemType;
 import org.spongepowered.api.item.ItemTypes;
 import org.spongepowered.api.item.inventory.*;
-import org.spongepowered.api.item.inventory.property.AbstractInventoryProperty;
+import org.spongepowered.api.item.inventory.property.InventoryCapacity;
+import org.spongepowered.api.item.inventory.property.InventoryDimension;
 import org.spongepowered.api.plugin.Plugin;
 import org.spongepowered.api.plugin.PluginContainer;
 import org.spongepowered.api.scheduler.Task;
@@ -38,6 +40,7 @@ import org.spongepowered.api.text.action.TextActions;
 import org.spongepowered.api.text.format.TextColors;
 
 import java.io.File;
+import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
@@ -96,6 +99,33 @@ public class ServerGUIs {
 						String command = ((String) args.getOne("command").orElse("")).toLowerCase();
 						String[] arguments = args.getOne("arguments").map(o -> ((String) o).split(" ")).orElse(new String[0]);
 						switch (command) {
+							case "settype":
+								if (arguments.length != 1) {
+									throw new CommandException(Text.of(TextColors.RED, "Not enough arguments. Please follow the suggestions."));
+								}
+								String archetypeId = arguments[0];
+								if (!archetypeId.contains(":")) archetypeId = "minecraft:" + archetypeId;
+								gui.archetypeId = Sponge.getRegistry().getType(InventoryArchetype.class, archetypeId).orElseThrow(() -> new CommandException(Text.of(TextColors.RED, "The archetype \'" + arguments[0] + "\' cannot be found."))).getId();
+								
+								src.sendMessage(Text.of(TextColors.GREEN, "Successfully updated the type."));
+								break;
+							case "rows":
+							case "columns":
+								if (arguments.length != 1) {
+									throw new CommandException(Text.of(TextColors.RED, "Not enough arguments. Please follow the suggestions."));
+								}
+								int value;
+								try {
+									value = Integer.parseInt(arguments[0]);
+								} catch (NumberFormatException e) {
+									throw new CommandException(Text.of(TextColors.RED, "\'" + arguments[0] + "\' is not a valid number."));
+								}
+								if (command.equals("rows")) {
+									gui.rows = value;
+								} else {
+									gui.columns = value;
+								}
+								break;
 							case "setlowergui":
 							case "setuppergui":
 								if (arguments.length != 2) {
@@ -107,16 +137,16 @@ public class ServerGUIs {
 								} catch (NumberFormatException e) {
 									throw new CommandException(Text.of(TextColors.RED, "\'" + arguments[1] + "\' is not a valid damage. (must be a number)."));
 								}
-								ItemStack is = ItemStack.builder().itemType(getItemType(arguments[0])).add(Keys.UNBREAKABLE, true).add(Keys.DISPLAY_NAME, Text.EMPTY).build();
+								ItemStack is = ItemStack.builder().itemType(Sponge.getGame().getRegistry().getType(ItemType.class, arguments[0]).orElseThrow(() -> new CommandException(Text.of(TextColors.RED, "The item \"" + arguments[0] + "\" cannot be found in the registry.")))).add(Keys.UNBREAKABLE, true).add(Keys.DISPLAY_NAME, Text.EMPTY).build();
 								is = ItemStack.builder().fromContainer(is.toContainer().set(DataQuery.of("UnsafeDamage"), damage)).build();
 								if (command.equals("setuppergui")) {
 									gui.upperGui = is.createSnapshot();
 									
-									src.sendMessage(Text.of(TextColors.GREEN, "Successfully updated upper GUI."));
+									src.sendMessage(Text.of(TextColors.GREEN, "Successfully updated the upper GUI."));
 								} else {
 									gui.lowerGui = is.createSnapshot();
 									
-									src.sendMessage(Text.of(TextColors.GREEN, "Successfully updated lower GUI."));
+									src.sendMessage(Text.of(TextColors.GREEN, "Successfully updated the lower GUI."));
 								}
 								break;
 							case "setblock":
@@ -129,8 +159,8 @@ public class ServerGUIs {
 								} catch (NumberFormatException e) {
 									throw new CommandException(Text.of(TextColors.RED, "\'" + arguments[0] + "\' is not a valid position. (must be a number)."));
 								}
-								if (position <= 0 || position > 27) {
-									throw new CommandException(Text.of(TextColors.RED, "The position must be within 1 and 54"));
+								if (position <= 0) {
+									throw new CommandException(Text.of(TextColors.RED, "The position must be start from 1"));
 								}
 								ItemStack handIs = player.getItemInHand(HandTypes.MAIN_HAND).orElse(null);
 								gui.items.put(position - 1, handIs == null || handIs.getType() == ItemTypes.AIR ? null : handIs.createSnapshot());
@@ -139,6 +169,7 @@ public class ServerGUIs {
 								break;
 							case "switchvisibility":
 								gui.showPlayerInventory = !gui.showPlayerInventory;
+								
 								src.sendMessage(Text.of(TextColors.GREEN, gui.showPlayerInventory ? "The player's inventory is now visible in the GUI." : "The player's inventory is now invisible in the GUI."));
 								break;
 						}
@@ -148,10 +179,6 @@ public class ServerGUIs {
 				})
 				.build();
 		Sponge.getCommandManager().register(this, serverguis, "serverguis");
-	}
-	
-	public static ItemType getItemType(String registryName) throws CommandException {
-		return Sponge.getGame().getRegistry().getType(ItemType.class, registryName).orElseThrow(() -> new CommandException(Text.of(TextColors.RED, "The item \"" + registryName + "\" cannot be found in the registry.")));
 	}
 	
 	@Listener
@@ -170,7 +197,8 @@ public class ServerGUIs {
 			}
 			Gui gui = GuiData.guiList.stream().filter(g -> g.dimensionId.equals(dimensionId) && g.position.equals(event.getTargetBlock().getPosition())).findFirst().orElse(null);
 			
-			if (modifyingPlayers.contains(player.getUniqueId())) {
+			ItemStack is = player.getItemInHand(HandTypes.MAIN_HAND).orElse(null);
+			if ((is == null || is.getType() == ItemTypes.AIR) && modifyingPlayers.contains(player.getUniqueId())) {
 				if (player.get(Keys.IS_SNEAKING).orElse(false)) {
 					if (gui != null) {
 						GuiData.guiList.remove(gui);
@@ -191,7 +219,24 @@ public class ServerGUIs {
 						player.sendMessage(Text.of(TextColors.GREEN, "Successfully transformed this block into a GUI."));
 					}
 					
-					player.sendMessage(Text.builder("Modify your GUI\n").color(TextColors.DARK_GREEN)
+					player.sendMessage(Text.of(" "));
+					player.sendMessage(Text.builder("Modify your GUI").color(TextColors.DARK_GREEN)
+							.append(Text.NEW_LINE)
+							.append(Text.builder("[Set Type]").color(TextColors.GOLD)
+									.onHover(TextActions.showText(Text.of(TextColors.YELLOW, "Click to change the type of the inventory.\n", TextColors.YELLOW, "You will need to type the id.\n", TextColors.YELLOW, "Available types: " + listArchetypes() + ".")))
+									.onClick(TextActions.suggestCommand("/serverguis " + gui.id + " settype <type>"))
+									.build())
+							.append(Text.NEW_LINE)
+							.append(Text.builder("[Set Columns]").color(TextColors.GOLD)
+									.onHover(TextActions.showText(Text.of(TextColors.YELLOW, "Click to change the number of columns.\n", TextColors.YELLOW, "You will need to type the number.")))
+									.onClick(TextActions.suggestCommand("/serverguis " + gui.id + " setcolumns <columns>"))
+									.build())
+							.append(Text.NEW_LINE)
+							.append(Text.builder("[Set Rows]").color(TextColors.GOLD)
+									.onHover(TextActions.showText(Text.of(TextColors.YELLOW, "Click to change the number of rows.\n", TextColors.YELLOW, "You will need to type the number.")))
+									.onClick(TextActions.suggestCommand("/serverguis " + gui.id + " setrows <rows>"))
+									.build())
+							.append(Text.NEW_LINE)
 							.append(Text.builder("[Set Upper GUI]").color(TextColors.GOLD)
 									.onHover(TextActions.showText(Text.of(TextColors.YELLOW, "Click to set the upper gui.\n", TextColors.YELLOW, "You will need to type the item id and the damage value.")))
 									.onClick(TextActions.suggestCommand("/serverguis " + gui.id + " setuppergui minecraft:diamond_hoe <damage>"))
@@ -212,10 +257,11 @@ public class ServerGUIs {
 									.onClick(TextActions.runCommand("/serverguis " + gui.id + " switchvisibility"))
 									.build())
 							.build());
+					player.sendMessage(Text.of(" "));
 				}
 				event.setCancelled(true);
 			} else if (gui != null) {
-				Inventory inv = Inventory.builder().of(InventoryArchetypes.CHEST).property(new SlotProperty(null, Property.Operator.EQUAL)).build(this);
+				Inventory inv = Inventory.builder().of(Sponge.getRegistry().getType(InventoryArchetype.class, gui.archetypeId).get())/*.property(InventoryDimension.of(gui.columns, gui.rows))*/.property(InventoryCapacity.of(gui.columns)).property(new SlotProperty(null, Property.Operator.EQUAL)).build(this);
 				int i = 0;
 				for (Inventory slot : inv.slots()) {
 					slot.peek();
@@ -233,7 +279,6 @@ public class ServerGUIs {
 					List<ItemStack> slots = new ArrayList<>();
 					for (Inventory slot : player.getInventory().slots()) {
 						slots.add(slot.poll().orElse(ItemStack.empty()));
-						//slot.set(ItemStack.empty());
 					}
 					inv.getInventoryProperty(SlotProperty.class).get().setSlots(slots);
 				}
@@ -241,6 +286,29 @@ public class ServerGUIs {
 				event.setCancelled(true);
 			}
 		}
+	}
+	
+	//Don't sue me pls
+	private static String listArchetypes() {
+		StringBuilder result = new StringBuilder();
+		try {
+			for (Field f : InventoryArchetypes.class.getFields()) {
+				Object o = f.get(null);
+				String id = ((CatalogType) o).getId();
+				if (id.startsWith("sponge:") || id.equals("minecraft:unknown") || id.equals("minecraft:player") || id.equals("minecraft:crafting")) continue;
+				if (id.startsWith("minecraft:")) id = id.substring(10);
+				if (o instanceof InventoryArchetype) {
+					if (result.length() == 0) {
+						result.append(id);
+					} else {
+						result.append(", ").append(id);
+					}
+				}
+			}
+		} catch (IllegalAccessException e) {
+			e.printStackTrace();
+		}
+		return result.toString();
 	}
 	
 	@Listener
@@ -272,6 +340,13 @@ public class ServerGUIs {
 			if (GuiData.guiList.removeIf(g -> g.dimensionId.equals(dimensionId) && g.position.equals(block.getPosition()))) {
 				GuiData.saveNode();
 			}
+		}
+	}
+	
+	@Listener
+	public void onChangeInventory(ChangeInventoryEvent event) {
+		if (event.getTargetInventory().getInventoryProperty(SlotProperty.class).isPresent()) {
+			event.setCancelled(true);
 		}
 	}
 }
