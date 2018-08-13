@@ -3,6 +3,7 @@ package com.happyzleaf.serverguis;
 import com.google.inject.Inject;
 import com.happyzleaf.serverguis.data.Gui;
 import com.happyzleaf.serverguis.data.GuiData;
+import com.happyzleaf.serverguis.data.SlotProperty;
 import org.spongepowered.api.Sponge;
 import org.spongepowered.api.block.BlockSnapshot;
 import org.spongepowered.api.command.CommandException;
@@ -11,6 +12,7 @@ import org.spongepowered.api.command.args.GenericArguments;
 import org.spongepowered.api.command.spec.CommandSpec;
 import org.spongepowered.api.config.DefaultConfig;
 import org.spongepowered.api.data.DataQuery;
+import org.spongepowered.api.data.Property;
 import org.spongepowered.api.data.Transaction;
 import org.spongepowered.api.data.key.Keys;
 import org.spongepowered.api.data.type.HandTypes;
@@ -18,20 +20,26 @@ import org.spongepowered.api.entity.living.player.Player;
 import org.spongepowered.api.event.Listener;
 import org.spongepowered.api.event.block.ChangeBlockEvent;
 import org.spongepowered.api.event.block.InteractBlockEvent;
+import org.spongepowered.api.event.filter.cause.Root;
 import org.spongepowered.api.event.game.GameReloadEvent;
 import org.spongepowered.api.event.game.state.GameInitializationEvent;
-import org.spongepowered.api.event.game.state.GameStoppingServerEvent;
+import org.spongepowered.api.event.item.inventory.ChangeInventoryEvent;
+import org.spongepowered.api.event.item.inventory.ClickInventoryEvent;
+import org.spongepowered.api.event.item.inventory.InteractInventoryEvent;
 import org.spongepowered.api.item.ItemType;
 import org.spongepowered.api.item.ItemTypes;
-import org.spongepowered.api.item.inventory.ItemStack;
+import org.spongepowered.api.item.inventory.*;
+import org.spongepowered.api.item.inventory.property.AbstractInventoryProperty;
 import org.spongepowered.api.plugin.Plugin;
 import org.spongepowered.api.plugin.PluginContainer;
+import org.spongepowered.api.scheduler.Task;
 import org.spongepowered.api.text.Text;
 import org.spongepowered.api.text.action.TextActions;
 import org.spongepowered.api.text.format.TextColors;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -99,7 +107,7 @@ public class ServerGUIs {
 								} catch (NumberFormatException e) {
 									throw new CommandException(Text.of(TextColors.RED, "\'" + arguments[1] + "\' is not a valid damage. (must be a number)."));
 								}
-								ItemStack is = ItemStack.builder().itemType(getItemType(arguments[0])).add(Keys.UNBREAKABLE, true).build();
+								ItemStack is = ItemStack.builder().itemType(getItemType(arguments[0])).add(Keys.UNBREAKABLE, true).add(Keys.DISPLAY_NAME, Text.EMPTY).build();
 								is = ItemStack.builder().fromContainer(is.toContainer().set(DataQuery.of("UnsafeDamage"), damage)).build();
 								if (command.equals("setuppergui")) {
 									gui.upperGui = is.createSnapshot();
@@ -119,15 +127,16 @@ public class ServerGUIs {
 								try {
 									position = Integer.parseInt(arguments[0]);
 								} catch (NumberFormatException e) {
-									throw new CommandException(Text.of(TextColors.RED, "\'" + arguments[1] + "\' is not a valid position. (must be a number)."));
+									throw new CommandException(Text.of(TextColors.RED, "\'" + arguments[0] + "\' is not a valid position. (must be a number)."));
 								}
-								if (position <= 0 || position > 54) {
+								if (position <= 0 || position > 27) {
 									throw new CommandException(Text.of(TextColors.RED, "The position must be within 1 and 54"));
 								}
 								ItemStack handIs = player.getItemInHand(HandTypes.MAIN_HAND).orElse(null);
 								gui.items.put(position - 1, handIs == null || handIs.getType() == ItemTypes.AIR ? null : handIs.createSnapshot());
 								
 								src.sendMessage(Text.of(TextColors.GREEN, "Successfully updated slot number " + position + " with your held item."));
+								break;
 							case "switchvisibility":
 								gui.showPlayerInventory = !gui.showPlayerInventory;
 								src.sendMessage(Text.of(TextColors.GREEN, gui.showPlayerInventory ? "The player's inventory is now visible in the GUI." : "The player's inventory is now invisible in the GUI."));
@@ -148,11 +157,6 @@ public class ServerGUIs {
 	@Listener
 	public void onGameReload(GameReloadEvent event) {
 		GuiData.loadNode();
-	}
-	
-	@Listener
-	public void onGameStoppingServer(GameStoppingServerEvent event) {
-		GuiData.saveNode();
 	}
 	
 	@Listener
@@ -188,31 +192,77 @@ public class ServerGUIs {
 						player.sendMessage(Text.of(TextColors.GREEN, "Successfully transformed this block into a GUI."));
 					}
 					
-					player.sendMessage(Text.builder("Modify: ").color(TextColors.DARK_GREEN)
-							.append(Text.builder("[Set the upper GUI]").color(TextColors.GOLD)
+					player.sendMessage(Text.builder("Modify your GUI\n").color(TextColors.DARK_GREEN)
+							.append(Text.builder("[Set Upper GUI]").color(TextColors.GOLD)
 									.onHover(TextActions.showText(Text.of(TextColors.YELLOW, "Click to set the upper gui.\n", TextColors.YELLOW, "You will need to type the item id and the damage value.")))
 									.onClick(TextActions.suggestCommand("/serverguis " + gui.id + " setuppergui minecraft:diamond_hoe <damage>"))
 									.build())
-							.append(Text.of(" "))
-							.append(Text.builder("[Set the lower GUI]").color(TextColors.GOLD)
+							.append(Text.NEW_LINE)
+							.append(Text.builder("[Set Lower GUI]").color(TextColors.GOLD)
 									.onHover(TextActions.showText(Text.of(TextColors.YELLOW, "Click to set the lower gui.\n", TextColors.YELLOW, "You will need to type the item id and the damage value.")))
 									.onClick(TextActions.suggestCommand("/serverguis " + gui.id + " setlowergui minecraft:diamond_hoe <damage>"))
 									.build())
-							.append(Text.of(" "))
-							.append(Text.builder("[Set item]").color(TextColors.GOLD)
+							.append(Text.NEW_LINE)
+							.append(Text.builder("[Set Item]").color(TextColors.GOLD)
 									.onHover(TextActions.showText(Text.of(TextColors.YELLOW, "Click to apply the held item to the given position.\n", TextColors.YELLOW, "You will need to type inventory position.")))
 									.onClick(TextActions.suggestCommand("/serverguis " + gui.id + " setblock <position>"))
 									.build())
-							.append(Text.of(" "))
-							.append(Text.builder("[Switch player's inventory visibility]").color(TextColors.GOLD)
+							.append(Text.NEW_LINE)
+							.append(Text.builder("[Switch Inventory Visibility]").color(TextColors.GOLD)
 									.onHover(TextActions.showText(Text.of(TextColors.YELLOW, "Click to set visible/invisible the player's inventory inside the gui.")))
 									.onClick(TextActions.runCommand("/serverguis " + gui.id + " switchvisibility"))
 									.build())
 							.build());
 				}
+				event.setCancelled(true);
 			} else if (gui != null) {
-				
+				Inventory inv = Inventory.builder().of(InventoryArchetypes.CHEST).property(new SlotProperty(null, Property.Operator.EQUAL)).build(this);
+				int i = 0;
+				for (Inventory slot : inv.slots()) {
+					slot.peek();
+					if (i == 0 && gui.upperGui != null) {
+						slot.set(gui.upperGui.createStack());
+					} else if (i == 18 && gui.lowerGui != null) {
+						slot.set(gui.lowerGui.createStack());
+					} else {
+						ItemStackSnapshot snapshot = gui.items.get(i);
+						slot.set(snapshot == null ? ItemStack.empty() : snapshot.createStack());
+					}
+					i++;
+				}
+				if (!gui.showPlayerInventory) {
+					List<ItemStack> slots = new ArrayList<>();
+					for (Inventory slot : player.getInventory().slots()) {
+						slots.add(slot.poll().orElse(ItemStack.empty()));
+						//slot.set(ItemStack.empty());
+					}
+					inv.getInventoryProperty(SlotProperty.class).get().setSlots(slots);
+				}
+				Task.builder().execute(() -> player.openInventory(inv)).submit(this);
+				event.setCancelled(true);
 			}
+		}
+	}
+	
+	@Listener
+	public void onClickInventory(ClickInventoryEvent event) {
+		if (event.getTargetInventory().getInventoryProperty(SlotProperty.class).isPresent()) {
+			event.setCancelled(true);
+		}
+	}
+	
+	@Listener
+	public void onInteractInventory(InteractInventoryEvent.Close event, @Root Player player) {
+		List<ItemStack> slots = event.getTargetInventory().getInventoryProperty(SlotProperty.class).map(SlotProperty::getValue).orElse(null);
+		if (slots != null) {
+			Task.builder().execute(() -> {
+				Iterator<ItemStack> iterator = slots.iterator();
+				for (Inventory s : player.getInventory().slots()) {
+					if (iterator.hasNext()) {
+						s.set(iterator.next());
+					}
+				}
+			}).submit(this);
 		}
 	}
 	

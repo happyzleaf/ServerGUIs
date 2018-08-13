@@ -37,4 +37,7 @@ public class Gui {
 	
 	@Setting
 	public boolean showPlayerInventory = true;
+	
+	@Setting
+	public int rows = 3;
 }
